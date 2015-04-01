@@ -17,14 +17,18 @@
 package cn.edu.bupt.iptvplayer.activity;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.PixelFormat;
 import android.media.AudioManager;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Message;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
@@ -46,6 +50,7 @@ import io.vov.vitamio.MediaPlayer.OnVideoSizeChangedListener;
 public class IPTVPlayerActivity extends Activity implements OnBufferingUpdateListener, OnCompletionListener, OnPreparedListener, OnVideoSizeChangedListener, SurfaceHolder.Callback {
 
     private static final String TAG = IPTVPlayerActivity.class.getName();
+    private String path="";
     private int videoWidth;
     private int videoHeight;
     private long currentPosition = 0;
@@ -57,8 +62,28 @@ public class IPTVPlayerActivity extends Activity implements OnBufferingUpdateLis
     private Intent intent;
     private boolean isVideoSizeKnown = false;
     private boolean isVideoReadyToBePlayed = false;
-    private boolean visible = false;
-    private Handler handler = new Handler();
+    private int visibleFlag = 1;
+
+    private GestureDetector mGestureDetector;
+    private AudioManager mAudioManager;   //获取音频管理器
+    private int mMaxVolume;
+    private int mVolume = -1;
+    private float mBrightness = -1f;
+
+    private Handler handler = new Handler(){
+        @Override
+        public void handleMessage(Message msg) {
+            if(msg.what==0x123) {
+                if (visibleFlag == 1) {
+                    controlView.setVisibility(View.INVISIBLE);
+                    visibleFlag = 0;
+                } else {
+                    controlView.setVisibility(View.VISIBLE);
+                    visibleFlag = 1;
+                }
+            }
+        }
+    };
     private Runnable r = new Runnable() {
         @Override
         public void run() {
@@ -85,17 +110,23 @@ public class IPTVPlayerActivity extends Activity implements OnBufferingUpdateLis
         seekPosition = (SeekBar) findViewById(R.id.seekPosition);
         seekPosition.setOnSeekBarChangeListener(new SeekCurrentPosition());
         surfaceView = (SurfaceView) findViewById(R.id.surface);
-        surfaceView.setOnClickListener(new SurfaceViewClick());
+        surfaceView.setOnTouchListener(new SurfaceViewScrollListen());
         surfaceHolder = surfaceView.getHolder();
         surfaceHolder.addCallback(this);
         surfaceHolder.setFormat(PixelFormat.RGBA_8888);
         intent = getIntent();
+        path=intent.getStringExtra(Global.EXTRA_LINK);
+
+        mGestureDetector = new GestureDetector(this, new MyGestureListener());
+        mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        mMaxVolume = mAudioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
     }
 
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         currentPosition = mediaPlayer.getCurrentPosition();
+        controlView.setVisibility(View.VISIBLE);
         startVideoPlayback();
     }
 
@@ -228,21 +259,6 @@ public class IPTVPlayerActivity extends Activity implements OnBufferingUpdateLis
     }
 
 
-    private class SurfaceViewClick implements View.OnClickListener {
-
-        @Override
-        public void onClick(View v) {
-
-            if (visible) {
-                controlView.setVisibility(View.INVISIBLE);
-                visible = false;
-            } else {
-                controlView.setVisibility(View.VISIBLE);
-                visible = true;
-            }
-        }
-    }
-
     private class SeekCurrentPosition implements SeekBar.OnSeekBarChangeListener {
         @Override
         public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
@@ -251,7 +267,6 @@ public class IPTVPlayerActivity extends Activity implements OnBufferingUpdateLis
                 mediaPlayer.start();
             }
         }
-
         @Override
         public void onStartTrackingTouch(SeekBar seekBar) {
 
@@ -262,4 +277,82 @@ public class IPTVPlayerActivity extends Activity implements OnBufferingUpdateLis
 
         }
     }
+
+    class SurfaceViewScrollListen implements View.OnTouchListener{
+        @Override
+        public boolean onTouch(View v, MotionEvent event) {
+            mGestureDetector.onTouchEvent(event);
+            switch (event.getAction() & MotionEvent.ACTION_MASK) {
+                case MotionEvent.ACTION_UP:
+                    endGesture();
+                    break;
+            }
+            return true;
+        }
+
+    }
+    private void endGesture() {
+        mVolume = -1;
+        mBrightness = -1f;
+    }
+
+    private class MyGestureListener extends GestureDetector.SimpleOnGestureListener{
+            //单击
+            @Override
+            public boolean onSingleTapUp(MotionEvent e) {
+                handler.sendEmptyMessage(0x123);
+                return super.onSingleTapUp(e);
+            }
+
+            //滑动
+            @Override
+            public boolean onScroll(MotionEvent e1, MotionEvent e2,
+                                    float distanceX, float distanceY) {
+                float mOldX = e1.getX(), mOldY = e1.getY();
+                int y = (int) e2.getRawY();
+                WindowManager windowManager=getWindowManager();
+                DisplayMetrics metrics=new DisplayMetrics();
+                windowManager.getDefaultDisplay().getMetrics(metrics);
+                int windowWidth = metrics.widthPixels;
+                int windowHeight =metrics.heightPixels;
+
+
+                if (mOldX > windowWidth * 4.0 / 5)// 右边滑动
+                    onVolumeSlide((mOldY - y) / windowHeight);  //得到滑动的百分比
+                if (mOldX < windowWidth / 5.0)// 左边滑动
+                    onBrightnessSlide((mOldY - y) / windowHeight);
+
+                return super.onScroll(e1, e2, distanceX, distanceY);
+            }
+        }
+        private void onBrightnessSlide(float percent) {
+            if (mBrightness < 0) {
+                mBrightness = getWindow().getAttributes().screenBrightness;
+                if (mBrightness <= 0.00f)
+                    mBrightness = 0.50f;
+                if (mBrightness < 0.01f)
+                    mBrightness = 0.01f;
+            }
+            WindowManager.LayoutParams lpa = getWindow().getAttributes();
+            lpa.screenBrightness = mBrightness + percent;
+            if (lpa.screenBrightness > 1.0f)
+                lpa.screenBrightness = 1.0f;
+            else if (lpa.screenBrightness < 0.01f)
+                lpa.screenBrightness = 0.01f;
+            getWindow().setAttributes(lpa);    //设置改变之后的亮度，使用百分比来表示亮度
+        }
+        private void onVolumeSlide(float percent) {
+            if (mVolume == -1) {
+                mVolume = mAudioManager.getStreamVolume(AudioManager.STREAM_MUSIC);  //
+                if (mVolume < 0)
+                    mVolume = 0;
+            }
+            int index = (int) (percent * mMaxVolume) + mVolume;
+            if (index > mMaxVolume)
+                index = mMaxVolume;
+            else if (index < 0)
+                index = 0;
+            mAudioManager.setStreamVolume(AudioManager.STREAM_MUSIC, index, 0);
+        }
+
 }

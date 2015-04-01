@@ -23,6 +23,8 @@
             android:textSize="20sp"
             android:padding="10dp"
             android:shadowColor="#f0f"
+            android:shadowDx="4"
+            android:shadowDy="4"
             android:shadowRadius="1"
             android:onClick="refresh"
             android:clickable="true" />
@@ -35,6 +37,8 @@
             android:textSize="20sp"
             android:padding="10dp"
             android:shadowColor="#f0f"
+            android:shadowDx="4"
+            android:shadowDy="4"
             android:shadowRadius="1"
             android:clickable="true"
             android:onClick="searchFile" />
@@ -45,7 +49,7 @@
         android:layout_width="fill_parent"
         android:layout_height="wrap_content"
         android:divider="#f00"
-        android:dividerHeight="2dp"
+        android:dividerHeight="2px"
         android:headerDividersEnabled="false"
      />
 </LinearLayout>
